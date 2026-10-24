@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>KATZ // RAWBLOCK TODO DASHBOARD</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Work+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+
+  <!-- Header -->
+  <header>
+    <div class="header-inner">
+      <div class="brand-block">
+        <span class="brand-tag mono">[RAWBLOCK::ENGINE // SYSTEM_01]</span>
+        <h1 class="brand-title headline">KATZ // TODO</h1>
+      </div>
+      <div class="header-chips">
+        <div class="chip chip-green">● SERVICE: ONLINE</div>
+        <div class="chip chip-sapphire">● BUN.SQL: ACTIVE</div>
+        <div class="chip chip-peach">● REDIS: 60S_TTL</div>
+        <div class="chip chip-muted" id="chip-telegram">● TG: DETECTING...</div>
+        <div class="chip chip-muted" id="chip-discord">● DISCORD: DETECTING...</div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main>
+
+    <!-- Metrics Row -->
+    <div class="metrics-grid">
+      <div class="metric-card accented">
+        <span class="metric-label">TOTAL TASKS</span>
+        <span class="metric-value" id="stat-total">0</span>
+        <span class="metric-sub">PERSISTED IN POSTGRES</span>
+      </div>
+      <div class="metric-card">
+        <span class="metric-label">PENDING</span>
+        <span class="metric-value" style="color: var(--peach);" id="stat-pending">0</span>
+        <span class="metric-sub">AWAITING COMPLETION</span>
+      </div>
+      <div class="metric-card">
+        <span class="metric-label">COMPLETED</span>
+        <span class="metric-value" style="color: var(--green);" id="stat-completed">0</span>
+        <span class="metric-sub">STATUS: VERIFIED</span>
+      </div>
+      <div class="metric-card">
+        <span class="metric-label">COMPLETION RATE</span>
+        <span class="metric-value" style="color: var(--sapphire);" id="stat-rate">0%</span>
+        <div class="bar-container">
+          <div class="bar-fill" id="stat-bar"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Two-column Content Area -->
+    <div class="content-grid">
+
+      <!-- Left Column: New Task Form & Task List -->
+      <div style="display: flex; flex-direction: column; gap: 24px;">
+
+        <!-- Add Task Elevated Card -->
+        <div class="card elevated">
+          <div class="card-title">
+            <span>CREATE_TASK //</span>
+            <span class="mono" style="font-size: 12px; color: var(--sapphire);">[ENTER_TO_SUBMIT]</span>
+          </div>
+          <form id="add-form" onsubmit="handleAddTask(event)">
+            <div class="form-group">
+              <label class="input-label" for="task-input">TASK DESCRIPTION & CATEGORY</label>
+              <div class="input-row">
+                <input
+                  type="text"
+                  id="task-input"
+                  class="raw-input"
+                  placeholder="e.g. Deploy worker to production edge..."
+                  autocomplete="off"
+                  required
+                />
+                <select id="task-category" class="raw-select" title="Select Category">
+                  <option value="general">GENERAL</option>
+                </select>
+                <button type="submit" class="btn btn-primary" id="btn-submit">
+                  + ADD TASK
+                </button>
+              </div>
+            </div>
+          </form>
+        </div>
+
+        <!-- Task Manifest Card -->
+        <div class="card">
+          <div class="card-title">
+            <span>TASK MANIFEST</span>
+            <span class="mono" id="sync-indicator" style="font-size: 11px; color: var(--green);">[LIVE SYNC]</span>
+          </div>
+
+          <!-- Status & Search Controls -->
+          <div class="filter-bar">
+            <div class="filter-buttons">
+              <button class="btn btn-filter active" onclick="setStatusFilter('all', this)">ALL</button>
+              <button class="btn btn-filter" onclick="setStatusFilter('pending', this)">PENDING</button>
+              <button class="btn btn-filter" onclick="setStatusFilter('completed', this)">COMPLETED</button>
+            </div>
+            <input
+              type="text"
+              id="search-input"
+              class="search-box"
+              placeholder="SEARCH TASKS..."
+              oninput="handleSearch(this.value)"
+            />
+          </div>
+
+          <!-- Category Filter Bar -->
+          <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 16px;">
+            <span class="mono" style="font-size: 11px; color: var(--subtext-0); text-transform: uppercase;">CATEGORY:</span>
+            <div class="filter-buttons" id="category-filter-chips" style="display: flex; gap: 6px; flex-wrap: wrap;">
+              <button class="btn btn-filter active" onclick="setCategoryFilter('all', this)">ALL</button>
+            </div>
+          </div>
+
+          <!-- Todo List Items -->
+          <div class="todo-list" id="todo-container">
+            <!-- Dynamic Content -->
+          </div>
+
+        </div>
+
+      </div>
+
+      <!-- Right Column: Category Management, Bot Commands & Audit Log -->
+      <div class="sidebar-section">
+
+        <!-- Category Management Card -->
+        <div class="card">
+          <div class="card-title">
+            <span>CATEGORY MANAGEMENT</span>
+            <span class="mono" style="font-size: 11px; color: var(--sapphire);">/CATEGORY</span>
+          </div>
+          <form id="add-category-form" onsubmit="handleAddCategory(event)" style="margin-bottom: 16px;">
+            <div class="input-row">
+              <input
+                type="text"
+                id="new-category-input"
+                class="raw-input"
+                placeholder="New category name..."
+                style="height: 40px; font-size: 13px;"
+                required
+              />
+              <button type="submit" class="btn btn-primary" style="height: 40px; padding: 0 16px; font-size: 12px;">
+                + ADD
+              </button>
+            </div>
+          </form>
+
+          <table class="cmd-table" id="category-table">
+            <thead>
+              <tr>
+                <th>CATEGORY</th>
+                <th>TASKS</th>
+                <th style="width: 50px;">ACTION</th>
+              </tr>
+            </thead>
+            <tbody id="category-table-body">
+              <!-- Populated via JS -->
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Bot Connections Status Card -->
+        <div class="card">
+          <div class="card-title">
+            <span>BOT CONNECTION STATUS</span>
+            <span class="mono" id="bot-overall-badge" style="font-size: 11px; color: var(--green);">[LIVE]</span>
+          </div>
+          <table class="cmd-table">
+            <thead>
+              <tr>
+                <th>SERVICE</th>
+                <th>STATUS</th>
+                <th>IDENTIFIER</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>TELEGRAM</strong></td>
+                <td id="status-tg-badge"><span class="chip chip-muted" style="padding: 2px 6px;">CHECKING</span></td>
+                <td id="status-tg-user" class="mono">-</td>
+              </tr>
+              <tr>
+                <td><strong>DISCORD</strong></td>
+                <td id="status-discord-badge"><span class="chip chip-muted" style="padding: 2px 6px;">CHECKING</span></td>
+                <td id="status-discord-user" class="mono">-</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Bot User Whitelist Management Card -->
+        <div class="card">
+          <div class="card-title">
+            <span>BOT ACCESS WHITELIST</span>
+            <span class="mono" style="font-size: 11px; color: var(--sapphire);">[DISCORD & TG USER IDS]</span>
+          </div>
+          <form id="add-whitelist-form" onsubmit="handleAddWhitelist(event)" style="margin-bottom: 14px;">
+            <div style="display: flex; flex-direction: column; gap: 8px;">
+              <div class="input-row">
+                <select id="whitelist-type" class="raw-select" style="height: 38px; padding: 6px 10px; font-size: 12px; width: 145px;">
+                  <option value="telegram">TELEGRAM ID</option>
+                  <option value="discord">DISCORD ID</option>
+                </select>
+                <input
+                  type="text"
+                  id="whitelist-val"
+                  class="raw-input"
+                  placeholder="User ID (e.g. 12345678)..."
+                  style="height: 38px; font-size: 12px;"
+                  required
+                />
+              </div>
+              <div class="input-row">
+                <input
+                  type="text"
+                  id="whitelist-label"
+                  class="raw-input"
+                  placeholder="Label / Username (e.g. @suphakit, Admin)..."
+                  style="height: 38px; font-size: 12px;"
+                />
+                <button type="submit" class="btn btn-primary" style="height: 38px; padding: 0 16px; font-size: 12px;">
+                  + ADD
+                </button>
+              </div>
+            </div>
+          </form>
+
+          <table class="cmd-table">
+            <thead>
+              <tr>
+                <th>PLATFORM</th>
+                <th>USER ID / LABEL</th>
+                <th style="width: 45px;">DEL</th>
+              </tr>
+            </thead>
+            <tbody id="whitelist-table-body">
+              <!-- Populated via JS -->
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Bot Commands Quick Ref -->
+        <div class="card">
+          <div class="card-title">
+            <span>BOT COMMANDS</span>
+            <span class="mono" style="font-size: 11px; color: var(--subtext-0);">TELEGRAM & DISCORD</span>
+          </div>
+          <table class="cmd-table">
+            <thead>
+              <tr>
+                <th>COMMAND</th>
+                <th>DESCRIPTION</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><span class="cmd-badge">/todo</span> [category]</td>
+                <td>List todos (optionally by category)</td>
+              </tr>
+              <tr>
+                <td><span class="cmd-badge">/todo add</span> [cat] &lt;title&gt;</td>
+                <td>Add task with optional category</td>
+              </tr>
+              <tr>
+                <td><span class="cmd-badge">/todo done</span> &lt;id&gt;</td>
+                <td>Mark task completed</td>
+              </tr>
+              <tr>
+                <td><span class="cmd-badge">/todo del</span> &lt;id&gt;</td>
+                <td>Delete task</td>
+              </tr>
+              <tr>
+                <td><span class="cmd-badge">/category list</span></td>
+                <td>List all categories & task counts</td>
+              </tr>
+              <tr>
+                <td><span class="cmd-badge">/category add</span> &lt;name&gt;</td>
+                <td>Create a new category</td>
+              </tr>
+              <tr>
+                <td><span class="cmd-badge">/category del</span> &lt;name&gt;</td>
+                <td>Delete a category</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Terminal Event Stream -->
+        <div class="card">
+          <div class="card-title">
+            <span>AUDIT LOG STREAM</span>
+            <span class="mono" style="font-size: 11px; color: var(--green);">● REALTIME</span>
+          </div>
+          <div class="terminal-box" id="terminal-stream">
+            <div class="terminal-entry">
+              <span class="terminal-time">[SYS_INIT]</span> RAWBLOCK ENGINE RUNNING ON BUN
+            </div>
+          </div>
+        </div>
+
+        <!-- REST Endpoints Spec Card -->
+        <div class="card">
+          <div class="card-title">
+            <span>REST API SPEC</span>
+            <span class="mono" style="font-size: 11px; color: var(--sapphire);">HONO</span>
+          </div>
+          <table class="cmd-table">
+            <thead>
+              <tr>
+                <th>METHOD</th>
+                <th>ENDPOINT</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td style="color: var(--green); font-weight: 700;">GET</td>
+                <td>/todos?category=&lt;name&gt;</td>
+              </tr>
+              <tr>
+                <td style="color: var(--sapphire); font-weight: 700;">POST</td>
+                <td>/todos (with {title, category})</td>
+              </tr>
+              <tr>
+                <td style="color: var(--peach); font-weight: 700;">PATCH</td>
+                <td>/todos/:id</td>
+              </tr>
+              <tr>
+                <td style="color: var(--red); font-weight: 700;">DELETE</td>
+                <td>/todos/:id</td>
+              </tr>
+              <tr>
+                <td style="color: var(--green); font-weight: 700;">GET</td>
+                <td>/categories</td>
+              </tr>
+              <tr>
+                <td style="color: var(--sapphire); font-weight: 700;">POST</td>
+                <td>/categories</td>
+              </tr>
+              <tr>
+                <td style="color: var(--red); font-weight: 700;">DELETE</td>
+                <td>/categories/:id</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+      </div>
+
+    </div>
+
+  </main>
+
+  <!-- Brutalist Toast Notification -->
+  <div id="toast"></div>
+
+  <!-- Footer -->
+  <footer>
+    RAWBLOCK DESIGN SYSTEM // CATPPUCCIN MACCHIATO // BUN + HONO + POSTGRESQL + REDIS // NO CORNERS, NO SHADOWS.
+  </footer>
+
+  <script src="/js/app.js"></script>
+</body>
+</html>

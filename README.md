@@ -4,12 +4,47 @@ Todo management service built on Bun with a Hono REST API, PostgreSQL persistenc
 
 ## Features
 
+- **Dashboard**: Brutalist RawBlock UI (`/` and `/dashboard`) with Catppuccin Macchiato styling, live task CRUD, and realtime stats.
+- **Modular Architecture**: Clean separation between static pages (`public/`), HTTP routes (`src/routes/`), and domain business logic (`src/modules/`).
 - **Runtime**: Bun with native `Bun.SQL` and `Bun.RedisClient` (zero external DB driver overhead).
 - **HTTP API**: High-performance REST API powered by [Hono](https://hono.dev).
 - **Caching**: 60-second Redis cache with automated invalidation on mutations.
 - **Chatbots**: Simultaneous Telegram (`grammy`) and Discord (`discord.js`) bot integrations.
 - **Docker**: Containerized deployment with Dockerfile and Docker Compose.
 - **Cross-Compilation**: Native standalone Linux binary build script (`x64`, `arm64`).
+
+---
+
+## Project Structure
+
+```text
+katz-todo/
+├── public/                 # Static web dashboard assets
+│   ├── index.html          # RawBlock HTML markup
+│   ├── css/
+│   │   └── style.css       # Catppuccin Macchiato brutalist styles
+│   └── js/
+│       └── app.js          # Client-side reactivity, CRUD, & polling
+├── src/
+│   ├── bot/                # Chatbot integrations
+│   │   ├── discord.ts      # Discord bot (!todo ...)
+│   │   ├── telegram.ts     # Telegram bot (/todo ...)
+│   │   └── index.ts        # Bot runner
+│   ├── modules/            # Business logic & services
+│   │   └── todo/
+│   │       ├── types.ts    # DTOs & domain models
+│   │       ├── service.ts  # Database queries & Redis caching
+│   │       └── index.ts
+│   ├── routes/             # Hono HTTP routers
+│   │   ├── dashboard.ts    # Dashboard & static asset routes
+│   │   ├── todos.ts        # REST API (/todos)
+│   │   └── index.ts
+│   ├── db.ts               # Native Bun.SQL & Bun.RedisClient
+│   └── index.ts            # Application entrypoint
+├── Dockerfile
+├── docker-compose.yml
+└── package.json
+```
 
 ---
 
@@ -35,15 +70,15 @@ Copy `.env.example` to `.env` and fill in your values:
 cp .env.example .env
 ```
 
-| Variable | Description | Default |
-| --- | --- | --- |
-| `PORT` | HTTP server port | `3000` |
-| `DATABASE_URL` | PostgreSQL connection string | `postgres://postgres:postgres@localhost:5432/app` |
-| `REDIS_URL` | Redis connection string | `redis://localhost:6379` |
+| Variable              | Description                                          | Default                                                      |
+| --------------------- | ---------------------------------------------------- | ------------------------------------------------------------ |
+| `PORT`                | HTTP server port                                     | `3000`                                                       |
+| `DATABASE_URL`        | PostgreSQL connection string                         | `postgres://postgres:postgres@localhost:5432/app`            |
+| `REDIS_URL`           | Redis connection string                              | `redis://localhost:6379`                                     |
 | `DOCKER_DATABASE_URL` | PostgreSQL connection string inside Docker container | `postgres://postgres:postgres@host.docker.internal:5432/app` |
-| `DOCKER_REDIS_URL` | Redis connection string inside Docker container | `redis://host.docker.internal:6379` |
-| `TELEGRAM_TOKEN` | Telegram bot API token (optional) | _empty_ |
-| `DISCORD_TOKEN` | Discord bot application token (optional) | _empty_ |
+| `DOCKER_REDIS_URL`    | Redis connection string inside Docker container      | `redis://host.docker.internal:6379`                          |
+| `TELEGRAM_TOKEN`      | Telegram bot API token (optional)                    | _empty_                                                      |
+| `DISCORD_TOKEN`       | Discord bot application token (optional)             | _empty_                                                      |
 
 ---
 
@@ -103,29 +138,42 @@ docker compose down
 
 ## REST API Reference
 
-### Health Check
+### Web Dashboard & Health Check
 
 ```http
 GET /
+# or
+GET /dashboard
 ```
 
-**Response (`200 OK`)**:
-```text
-Hello Hono! Todo service & bots running.
+**Browser Response (`200 OK`)**:
+Interactive RawBlock brutalist web dashboard.
+
+**JSON Client Response (`Accept: application/json`)**:
+
+```json
+{
+  "status": "ok",
+  "message": "Todo service & bots running."
+}
 ```
 
 ### List Todos
 
 ```http
 GET /todos
+# Optional category filter:
+GET /todos?category=work
 ```
 
 **Response (`200 OK`)**:
+
 ```json
 [
   {
     "id": 1,
     "title": "Buy milk",
+    "category": "work",
     "completed": false,
     "created_at": "2026-10-24T15:00:00.000Z",
     "updated_at": "2026-10-24T15:00:00.000Z"
@@ -140,15 +188,18 @@ POST /todos
 Content-Type: application/json
 
 {
-  "title": "Buy milk"
+  "title": "Buy milk",
+  "category": "work"
 }
 ```
 
 **Response (`201 Created`)**:
+
 ```json
 {
   "id": 1,
   "title": "Buy milk",
+  "category": "work",
   "completed": false,
   "created_at": "2026-10-24T15:00:00.000Z",
   "updated_at": "2026-10-24T15:00:00.000Z"
@@ -162,15 +213,18 @@ PATCH /todos/:id
 Content-Type: application/json
 
 {
-  "completed": true
+  "completed": true,
+  "category": "urgent"
 }
 ```
 
 **Response (`200 OK`)**:
+
 ```json
 {
   "id": 1,
   "title": "Buy milk",
+  "category": "urgent",
   "completed": true,
   "created_at": "2026-10-24T15:00:00.000Z",
   "updated_at": "2026-10-24T15:05:00.000Z"
@@ -184,6 +238,7 @@ DELETE /todos/:id
 ```
 
 **Response (`200 OK`)**:
+
 ```json
 {
   "success": true,
@@ -191,17 +246,160 @@ DELETE /todos/:id
 }
 ```
 
+### Categories API
+
+#### List Categories
+
+```http
+GET /categories
+```
+
+**Response (`200 OK`)**:
+
+```json
+[
+  {
+    "id": 1,
+    "name": "general",
+    "created_at": "2026-10-25T00:00:00.000Z",
+    "todo_count": 3
+  },
+  {
+    "id": 2,
+    "name": "work",
+    "created_at": "2026-10-25T00:00:00.000Z",
+    "todo_count": 5
+  }
+]
+```
+
+#### Create Category
+
+```http
+POST /categories
+Content-Type: application/json
+
+{
+  "name": "shopping"
+}
+```
+
+**Response (`201 Created`)**:
+
+```json
+{
+  "id": 5,
+  "name": "shopping",
+  "created_at": "2026-10-25T03:00:00.000Z"
+}
+```
+
+#### Delete Category
+
+```http
+DELETE /categories/:id
+```
+
+**Response (`200 OK`)**:
+
+```json
+{
+  "success": true,
+  "identifier": "shopping"
+}
+```
+
+### Whitelist API (Bot Access Control)
+
+Controls which Telegram User IDs and Discord User IDs are authorized to interact with the chatbots. Managed strictly via the web dashboard and REST API.
+
+#### List Whitelist Rules
+
+```http
+GET /whitelist
+```
+
+**Response (`200 OK`)**:
+
+```json
+[
+  {
+    "id": 1,
+    "type": "telegram",
+    "value": "123456789",
+    "label": "@suphakit",
+    "enabled": true,
+    "created_at": "2026-10-25T00:00:00.000Z"
+  },
+  {
+    "id": 2,
+    "type": "discord",
+    "value": "987654321012345678",
+    "label": "George#1234",
+    "enabled": true,
+    "created_at": "2026-10-25T00:00:00.000Z"
+  }
+]
+```
+
+#### Add User ID to Whitelist
+
+```http
+POST /whitelist
+Content-Type: application/json
+
+{
+  "type": "telegram",
+  "value": "123456789",
+  "label": "@suphakit"
+}
+```
+
+**Response (`201 Created`)**:
+
+```json
+{
+  "id": 3,
+  "type": "telegram",
+  "value": "123456789",
+  "label": "@suphakit",
+  "enabled": true,
+  "created_at": "2026-10-25T03:30:00.000Z"
+}
+```
+
+#### Delete Whitelist Rule
+
+```http
+DELETE /whitelist/:id
+```
+
+**Response (`200 OK`)**:
+
+```json
+{
+  "success": true,
+  "identifier": "123456789"
+}
+```
+
 ---
 
 ## Bot Commands
 
-Both Telegram and Discord bots support equivalent commands:
+Both Telegram (`/todo ...`, `/category ...`) and Discord (`!todo ...`, `!category ...`) bots support equivalent commands:
 
-| Command (Discord) | Command (Telegram) | Arguments | Description |
-| --- | --- | --- | --- |
-| `!help` | `/help`, `/start` | None | Show command list and usage |
-| `!todos`, `!list` | `/todos`, `/list` | None | List all todo items with completion status |
-| `!add` | `/add` | `<title>` | Create a new todo item |
-| `!done` | `/done` | `<id>` | Mark a todo item as completed |
-| `!undone` | `/undone` | `<id>` | Mark a todo item as incomplete |
-| `!del`, `!delete` | `/del` | `<id>` | Delete a todo item by ID |
+| Command (Discord) | Command (Telegram) | Arguments | Access | Description |
+| --- | --- | --- | --- | --- |
+| `!todo help` | `/todo help`, `/help`, `/start` | None | **Public** | Show command list, usage, and your User ID |
+| `!todo` or `!todo list` | `/todo` or `/todo list` | `[category]` | **Public** | List all todo items (optionally filtered by category) |
+| `!category` or `!category list` | `/category` or `/category list` | None | **Public** | List all categories with task counts |
+| `!todo add` | `/todo add` | `[category] <title>` | **Whitelist** | Create a new todo item with optional category |
+| `!todo done` | `/todo done` | `<id>` | **Whitelist** | Mark a todo item as completed |
+| `!todo undone` | `/todo undone` | `<id>` | **Whitelist** | Mark a todo item as incomplete |
+| `!todo del` | `/todo del` | `<id>` | **Whitelist** | Delete a todo item by ID |
+| `!category add` | `/category add` | `<name>` | **Whitelist** | Create a new category |
+| `!category del` | `/category del` | `<name\|id>` | **Whitelist** | Delete a category |
+
+> [!NOTE]
+> Bot Whitelisting is managed strictly through the **Website Dashboard** (`/dashboard`) and REST API. Any user can view `help` and `list` tasks/categories, while mutation actions (`add`, `done`, `undone`, `del`, category edits) require the user's Telegram or Discord ID to be whitelisted.
