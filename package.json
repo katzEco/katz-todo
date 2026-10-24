@@ -2,9 +2,12 @@
   "name": "katz-todo",
   "scripts": {
     "dev": "bun run --hot src/index.ts",
-    "build": "bun run scripts/build.ts"
+    "build": "bun run scripts/build.ts",
+    "bot": "bun run src/bot/index.ts"
   },
   "dependencies": {
+    "discord.js": "^14.27.0",
+    "grammy": "^1.46.0",
     "hono": "^4.13.13"
   },
   "devDependencies": {
