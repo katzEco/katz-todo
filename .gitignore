@@ -1,4 +1,19 @@
 # deps
 node_modules/
 
+# build
+dist/
+
+# env
+.env
+.env.*
+!.env.example
+
+# logs
+*.log
+
+# os
+.DS_Store
+
+# agents
 /.agents
