@@ -61,6 +61,14 @@ export async function listTodos(categoryFilter?: string): Promise<TodoItem[]> {
 
 export async function addTodo(title: string, category: string = 'general'): Promise<TodoItem> {
   const cleanCat = (category || 'general').trim().toLowerCase();
+
+  // Ensure category exists in categories table
+  await sql`
+    INSERT INTO categories (name)
+    VALUES (${cleanCat})
+    ON CONFLICT (name) DO NOTHING
+  `;
+
   const rows = await sql`
     INSERT INTO todo_items (title, category)
     VALUES (${title}, ${cleanCat})
@@ -79,7 +87,14 @@ export async function updateTodo(id: number, updates: UpdateTodoDto): Promise<To
     fields.push(sql`completed = ${updates.completed}`);
   }
   if (updates.category) {
-    fields.push(sql`category = ${updates.category.trim().toLowerCase()}`);
+    const cleanCat = updates.category.trim().toLowerCase();
+    await sql`
+      INSERT INTO categories (name)
+      VALUES (${cleanCat})
+      ON CONFLICT (name) DO NOTHING
+    `;
+    fields.push(sql`category = ${cleanCat}`);
+    await redis.del("category:list");
   }
   if (updates.title) {
     fields.push(sql`title = ${updates.title.trim()}`);

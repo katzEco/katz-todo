@@ -129,19 +129,16 @@ export async function deleteWhitelist(idOrValue: number | string): Promise<boole
 
 /**
  * Validates if a user ID is whitelisted for a given bot platform (telegram or discord).
- * If no whitelist rules exist for the platform, access is open by default.
+ * Strict whitelist: access denied (false) unless user ID is explicitly present and enabled.
  */
 export async function isUserWhitelisted(platform: 'telegram' | 'discord', userId: string | number): Promise<boolean> {
+  if (!userId) return false;
   const idStr = String(userId).trim();
   const entries = await listWhitelist();
   const platformRules = entries.filter((e) => e.enabled && e.type === platform);
 
-  // If no whitelist rules configured for this platform, allow access
-  if (platformRules.length === 0) {
-    return true;
-  }
-
-  return platformRules.some((e) => e.value === idStr);
+  // Strict whitelist: must match an enabled entry in DB
+  return platformRules.some((e) => e.value.trim() === idStr);
 }
 
 /**

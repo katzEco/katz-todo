@@ -77,7 +77,7 @@
                   type="text"
                   id="task-input"
                   class="raw-input"
-                  placeholder="e.g. Deploy worker to production edge..."
+                  placeholder="e.g. Deploy worker to production edge... [Hotkey: N]"
                   autocomplete="off"
                   required
                 />
@@ -96,7 +96,12 @@
         <div class="card">
           <div class="card-title">
             <span>TASK MANIFEST</span>
-            <span class="mono" id="sync-indicator" style="font-size: 11px; color: var(--green);">[LIVE SYNC]</span>
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <button class="btn btn-filter" id="btn-toggle-edit-mode" onclick="toggleEditMode()" style="padding: 2px 10px; font-size: 11px; height: 26px;">
+                ✎ EDIT MODE [E]
+              </button>
+              <span class="mono" id="sync-indicator" style="font-size: 11px; color: var(--green);">[LIVE SYNC]</span>
+            </div>
           </div>
 
           <!-- Status & Search Controls -->
@@ -110,7 +115,7 @@
               type="text"
               id="search-input"
               class="search-box"
-              placeholder="SEARCH TASKS..."
+              placeholder="SEARCH TASKS... [/]"
               oninput="handleSearch(this.value)"
             />
           </div>
@@ -139,7 +144,7 @@
         <div class="card">
           <div class="card-title">
             <span>CATEGORY MANAGEMENT</span>
-            <span class="mono" style="font-size: 11px; color: var(--sapphire);">/CATEGORY</span>
+            <span class="mono" style="font-size: 11px; color: var(--sapphire);">/TODO CATEGORY</span>
           </div>
           <form id="add-category-form" onsubmit="handleAddCategory(event)" style="margin-bottom: 16px;">
             <div class="input-row">
@@ -270,27 +275,35 @@
                 <td>List todos (optionally by category)</td>
               </tr>
               <tr>
+                <td><span class="cmd-badge">/todo stats</span></td>
+                <td>Analytics dashboard & progress bar</td>
+              </tr>
+              <tr>
                 <td><span class="cmd-badge">/todo add</span> [cat] &lt;title&gt;</td>
-                <td>Add task with optional category</td>
+                <td>Add todo with optional category</td>
               </tr>
               <tr>
                 <td><span class="cmd-badge">/todo done</span> &lt;id&gt;</td>
-                <td>Mark task completed</td>
+                <td>Mark todo completed</td>
               </tr>
               <tr>
                 <td><span class="cmd-badge">/todo del</span> &lt;id&gt;</td>
-                <td>Delete task</td>
+                <td>Delete todo</td>
               </tr>
               <tr>
-                <td><span class="cmd-badge">/category list</span></td>
+                <td><span class="cmd-badge">/todo clear</span> [count]</td>
+                <td>Clear chat messages (1-100)</td>
+              </tr>
+              <tr>
+                <td><span class="cmd-badge">/todo category</span> (or list)</td>
                 <td>List all categories & task counts</td>
               </tr>
               <tr>
-                <td><span class="cmd-badge">/category add</span> &lt;name&gt;</td>
+                <td><span class="cmd-badge">/todo category add</span> &lt;name&gt;</td>
                 <td>Create a new category</td>
               </tr>
               <tr>
-                <td><span class="cmd-badge">/category del</span> &lt;name&gt;</td>
+                <td><span class="cmd-badge">/todo category del</span> &lt;name&gt;</td>
                 <td>Delete a category</td>
               </tr>
             </tbody>

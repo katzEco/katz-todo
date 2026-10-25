@@ -294,6 +294,27 @@ Content-Type: application/json
 }
 ```
 
+#### Update Category Name
+
+```http
+PATCH /categories/:id
+Content-Type: application/json
+
+{
+  "name": "groceries"
+}
+```
+
+**Response (`200 OK`)**:
+
+```json
+{
+  "id": 5,
+  "name": "groceries",
+  "created_at": "2026-10-25T03:00:00.000Z"
+}
+```
+
 #### Delete Category
 
 ```http
@@ -387,19 +408,31 @@ DELETE /whitelist/:id
 
 ## Bot Commands
 
-Both Telegram (`/todo ...`, `/category ...`) and Discord (`!todo ...`, `!category ...`) bots support equivalent commands:
+Both Telegram (`/todo ...`, `/task ...`) and Discord (`!todo ...`, `!task ...`) bots support equivalent commands:
 
 | Command (Discord) | Command (Telegram) | Arguments | Access | Description |
 | --- | --- | --- | --- | --- |
 | `!todo help` | `/todo help`, `/help`, `/start` | None | **Public** | Show command list, usage, and your User ID |
-| `!todo` or `!todo list` | `/todo` or `/todo list` | `[category]` | **Public** | List all todo items (optionally filtered by category) |
-| `!category` or `!category list` | `/category` or `/category list` | None | **Public** | List all categories with task counts |
+| `!todo` or `!todo list` | `/todo` or `/todo list` | `[category]` | **Public** | List all todos with interactive buttons |
+| `!todo stats` | `/todo stats`, `/stats` | None | **Public** | Visual analytics dashboard with progress bar & category counts |
+| `!todo category` or `!todo category list` | `/todo category` or `/todo category list` | None | **Public** | List all categories with task counts |
 | `!todo add` | `/todo add` | `[category] <title>` | **Whitelist** | Create a new todo item with optional category |
 | `!todo done` | `/todo done` | `<id>` | **Whitelist** | Mark a todo item as completed |
 | `!todo undone` | `/todo undone` | `<id>` | **Whitelist** | Mark a todo item as incomplete |
 | `!todo del` | `/todo del` | `<id>` | **Whitelist** | Delete a todo item by ID |
-| `!category add` | `/category add` | `<name>` | **Whitelist** | Create a new category |
-| `!category del` | `/category del` | `<name\|id>` | **Whitelist** | Delete a category |
+| `!todo clear` | `/todo clear`, `/clear` | `[count]` | **Whitelist** | Clear recent chat messages (1-100) |
+| `!todo category add` | `/todo category add` | `<name>` | **Whitelist** | Create a new category |
+| `!todo category del` | `/todo category del` | `<name\|id>` | **Whitelist** | Delete a category |
 
 > [!NOTE]
-> Bot Whitelisting is managed strictly through the **Website Dashboard** (`/dashboard`) and REST API. Any user can view `help` and `list` tasks/categories, while mutation actions (`add`, `done`, `undone`, `del`, category edits) require the user's Telegram or Discord ID to be whitelisted.
+> **Enhanced Interactivity**:
+> - **Telegram**:
+>   - **Persistent Bottom Keyboard**: Native persistent reply keyboard (`[📋 Tasks] [➕ Add Task]`, `[📁 Categories] [📊 Stats]`, `[🧹 Clear Chat] [❓ Help]`).
+>   - **Category Filter Chips**: Instant in-place category filtering rows (`[🏷️ All] [work] [personal] ...`).
+>   - **Task Detail & Move Menu**: Dedicated task management card (`⚙️`) with instant category reassignments (`🏷️ Move Category`) and toggle.
+>   - **Conversational Task & Category Creation**: Native `ForceReply` prompts enabling one-tap reply without typing slash commands.
+>   - **Visual Analytics Dashboard**: Completion rate progress bar (`[████████░░░░] 67%`), category breakdown, and quick drill-down buttons.
+>   - **Two-Step Clear Chat**: Deletion confirmation prompt with self-destructing status notification.
+> - **Discord**: Native modal dialogs (`ModalBuilder`) for adding tasks with categories, interactive status filter buttons, category dropdown explorer (`StringSelectMenuBuilder`), and two-step clear chat confirmation.
+> - **Web Dashboard**: Global edit mode (`[E]`), inline title/category edits, inline category renaming, and keyboard hotkeys (`/` for search, `N` for task creation, `Esc` to cancel).
+> - **Security**: All mutating buttons, modal submissions, and conversational replies strictly enforce database whitelist rules.

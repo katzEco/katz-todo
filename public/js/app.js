@@ -6,6 +6,25 @@ let currentStatusFilter = 'all';
 let currentCategoryFilter = 'all';
 let searchQuery = '';
 let isSubmitting = false;
+let isGlobalEditMode = false;
+let editingTaskId = null;
+
+function parseTitleAndCategory(rawInput, fallbackCategory = 'general') {
+  const text = (rawInput || '').trim();
+  const bracketMatch = text.match(/^\[([a-zA-Z0-9_-]+)\]\s+(.+)$/);
+  if (bracketMatch) {
+    return { category: bracketMatch[1].toLowerCase(), title: bracketMatch[2].trim() };
+  }
+  const colonMatch = text.match(/^([a-zA-Z0-9_-]+):\s+(.+)$/);
+  if (colonMatch) {
+    return { category: colonMatch[1].toLowerCase(), title: colonMatch[2].trim() };
+  }
+  const flagMatch = text.match(/^(.+?)\s+(?:-c|--category)\s+([a-zA-Z0-9_-]+)$/);
+  if (flagMatch) {
+    return { category: flagMatch[2].toLowerCase(), title: flagMatch[1].trim() };
+  }
+  return { category: fallbackCategory, title: text };
+}
 
 function logEvent(msg) {
   const stream = document.getElementById('terminal-stream');
@@ -259,10 +278,15 @@ function renderCategoryUI() {
         <td><strong>${escapeHtml(c.name)}</strong></td>
         <td>${c.todo_count || 0}</td>
         <td>
-          ${c.name === 'general' ? '<span style="color: var(--overlay-0);">LOCK</span>' : `
-            <button class="btn btn-destructive" style="padding: 2px 6px; font-size: 10px; height: 24px;" onclick="handleDeleteCategory(${c.id}, '${escapeHtml(c.name)}')">
-              DEL
-            </button>
+          ${c.name === 'general' ? '<span style="color: var(--overlay-0); font-size: 11px;">LOCK</span>' : `
+            <div style="display: flex; gap: 4px; align-items: center;">
+              <button class="btn btn-filter" style="padding: 2px 6px; font-size: 10px; height: 24px;" onclick="handleEditCategory(${c.id}, '${escapeHtml(c.name)}')">
+                EDIT
+              </button>
+              <button class="btn btn-destructive" style="padding: 2px 6px; font-size: 10px; height: 24px;" onclick="handleDeleteCategory(${c.id}, '${escapeHtml(c.name)}')">
+                DEL
+              </button>
+            </div>
           `}
         </td>
       </tr>
@@ -277,7 +301,7 @@ function renderWhitelistUI() {
   if (whitelist.length === 0) {
     tableBody.innerHTML = `
       <tr>
-        <td colspan="3" style="text-align: center; color: var(--overlay-0);">NO USER ID WHITELIST RULES (OPEN ACCESS)</td>
+        <td colspan="3" style="text-align: center; color: var(--peach); font-size: 11px; padding: 12px;">NO WHITELIST RULES CONFIGURED (MUTATIONS BLOCKED)</td>
       </tr>
     `;
     return;
@@ -322,6 +346,77 @@ function handleSearch(val) {
   renderTodoList();
 }
 
+function toggleEditMode() {
+  isGlobalEditMode = !isGlobalEditMode;
+  editingTaskId = null;
+  const btn = document.getElementById('btn-toggle-edit-mode');
+  if (btn) {
+    btn.classList.toggle('active', isGlobalEditMode);
+    btn.textContent = isGlobalEditMode ? '✓ DONE EDITING' : '✎ EDIT MODE';
+  }
+  renderTodoList();
+}
+
+function startEditTask(id) {
+  editingTaskId = id;
+  renderTodoList();
+  setTimeout(() => {
+    const el = document.getElementById('edit-title-' + id);
+    if (el) {
+      el.focus();
+      el.select();
+    }
+  }, 40);
+}
+
+function cancelEditTask(id) {
+  if (editingTaskId === id) {
+    editingTaskId = null;
+  }
+  renderTodoList();
+}
+
+async function handleSaveEditTask(e, id) {
+  e.preventDefault();
+  const titleInput = document.getElementById('edit-title-' + id);
+  const catSelect = document.getElementById('edit-cat-' + id);
+  if (!titleInput) return;
+
+  const newTitle = titleInput.value.trim();
+  const newCategory = (catSelect ? catSelect.value : 'general').trim().toLowerCase();
+  if (!newTitle) return;
+
+  try {
+    const res = await fetch('/todos/' + id, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: newTitle, category: newCategory })
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to update task');
+    }
+
+    const updated = await res.json();
+    const idx = todos.findIndex(t => t.id === id);
+    if (idx !== -1) {
+      todos[idx] = updated;
+    }
+    if (editingTaskId === id) {
+      editingTaskId = null;
+    }
+    showToast(`Saved task #${id} [${updated.category}]`);
+    logEvent(`EDITED TASK #${id} [${updated.category}]: "${updated.title}"`);
+    await fetchCategories();
+    renderTodoList();
+    updateMetrics();
+  } catch (err) {
+    showToast(err.message, true);
+    logEvent('ERROR SAVING TASK #' + id + ': ' + err.message);
+  }
+}
+
 function renderTodoList() {
   const container = document.getElementById('todo-container');
   if (!container) return;
@@ -355,7 +450,42 @@ function renderTodoList() {
   }
 
   container.innerHTML = filtered.map(t => {
-    const cat = t.category || 'general';
+    const cat = (t.category || 'general').toLowerCase();
+    const isEditing = isGlobalEditMode || editingTaskId === t.id;
+
+    if (isEditing) {
+      return `
+        <div class="todo-item editing" id="todo-${t.id}" style="border-left: 5px solid var(--sapphire); background: var(--surface-1); padding: 10px 12px;">
+          <form onsubmit="handleSaveEditTask(event, ${t.id})" style="display: flex; width: 100%; gap: 8px; align-items: center; flex-wrap: wrap;">
+            <span class="todo-id" style="font-weight: 700;">#${t.id}</span>
+            <select id="edit-cat-${t.id}" class="raw-select" style="height: 34px; padding: 2px 8px; font-size: 12px; width: 130px;">
+              ${categories.map(c => `
+                <option value="${escapeHtml(c.name)}" ${c.name === cat ? 'selected' : ''}>
+                  ${escapeHtml(c.name.toUpperCase())}
+                </option>
+              `).join('')}
+            </select>
+            <input
+              type="text"
+              id="edit-title-${t.id}"
+              class="raw-input"
+              value="${escapeHtml(t.title)}"
+              style="flex: 1; min-width: 170px; height: 34px; font-size: 13px;"
+              required
+              autocomplete="off"
+              onkeydown="if(event.key==='Escape') cancelEditTask(${t.id})"
+            />
+            <button type="submit" class="btn btn-primary" style="height: 34px; padding: 0 12px; font-size: 11px;">
+              SAVE
+            </button>
+            <button type="button" class="btn btn-filter" style="height: 34px; padding: 0 10px; font-size: 11px;" onclick="cancelEditTask(${t.id})">
+              CANCEL
+            </button>
+          </form>
+        </div>
+      `;
+    }
+
     return `
       <div class="todo-item ${t.completed ? 'completed' : ''}" id="todo-${t.id}">
         <div class="todo-left">
@@ -373,7 +503,16 @@ function renderTodoList() {
         </div>
         <div class="todo-right">
           <button
+            class="btn btn-filter"
+            style="padding: 2px 8px; font-size: 11px; height: 28px;"
+            onclick="startEditTask(${t.id})"
+            title="Edit task title and category"
+          >
+            EDIT
+          </button>
+          <button
             class="btn btn-destructive"
+            style="padding: 2px 8px; font-size: 11px; height: 28px;"
             onclick="handleDeleteTask(${t.id})"
             title="Delete task"
           >
@@ -392,13 +531,15 @@ async function handleAddTask(e) {
 
   const input = document.getElementById('task-input');
   const catSelect = document.getElementById('task-category');
-  const title = input.value.trim();
-  const category = (catSelect ? catSelect.value : 'general').trim();
+  const rawInput = input.value.trim();
+  const selectedCat = (catSelect ? catSelect.value : 'general').trim();
 
-  if (!title) return;
+  if (!rawInput) return;
+
+  const { title, category } = parseTitleAndCategory(rawInput, selectedCat);
 
   isSubmitting = true;
-  const submitBtn = document.getElementById('btn-submit');
+  const submitBtn = document.getElementById('btn-add') || document.getElementById('btn-submit');
   if (submitBtn) submitBtn.disabled = true;
 
   try {
@@ -456,6 +597,40 @@ async function handleAddCategory(e) {
   } catch (err) {
     showToast(err.message, true);
     logEvent('ERROR ADDING CATEGORY: ' + err.message);
+  }
+}
+
+async function handleEditCategory(id, currentName) {
+  if (currentName === 'general') {
+    showToast('Cannot rename default "general" category', true);
+    return;
+  }
+  const newName = prompt(`Rename category "${currentName}" to:`, currentName);
+  if (!newName || newName.trim().toLowerCase() === currentName.toLowerCase()) return;
+  const clean = newName.trim().toLowerCase();
+
+  try {
+    const res = await fetch('/categories/' + id, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: clean })
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to rename category');
+    }
+
+    showToast(`Renamed category "${currentName}" -> "${clean}"`);
+    logEvent(`RENAMED CATEGORY: "${currentName}" -> "${clean}"`);
+    if (currentCategoryFilter === currentName) {
+      currentCategoryFilter = clean;
+    }
+    await fetchCategories();
+    await fetchTodos();
+  } catch (err) {
+    showToast(err.message, true);
+    logEvent('ERROR RENAMING CATEGORY: ' + err.message);
   }
 }
 
@@ -597,6 +772,7 @@ async function handleDeleteTask(id) {
 // Global hooks
 window.handleAddTask = handleAddTask;
 window.handleAddCategory = handleAddCategory;
+window.handleEditCategory = handleEditCategory;
 window.handleDeleteCategory = handleDeleteCategory;
 window.handleAddWhitelist = handleAddWhitelist;
 window.handleDeleteWhitelist = handleDeleteWhitelist;
@@ -605,6 +781,43 @@ window.handleDeleteTask = handleDeleteTask;
 window.setStatusFilter = setStatusFilter;
 window.setCategoryFilter = setCategoryFilter;
 window.handleSearch = handleSearch;
+window.toggleEditMode = toggleEditMode;
+window.startEditTask = startEditTask;
+window.cancelEditTask = cancelEditTask;
+window.handleSaveEditTask = handleSaveEditTask;
+
+// Keyboard Shortcuts for Rapid Interaction
+document.addEventListener('keydown', (e) => {
+  const tag = (document.activeElement?.tagName || '').toLowerCase();
+  const isInput = tag === 'input' || tag === 'textarea' || tag === 'select';
+
+  if (e.key === 'Escape') {
+    if (editingTaskId !== null) {
+      cancelEditTask(editingTaskId);
+    } else if (isInput) {
+      document.activeElement.blur();
+    }
+    return;
+  }
+
+  if (isInput) return;
+
+  if (e.key === '/') {
+    e.preventDefault();
+    const search = document.getElementById('search-input');
+    if (search) search.focus();
+  } else if (e.key === 'n' || e.key === 'N') {
+    e.preventDefault();
+    const taskInput = document.getElementById('task-input');
+    if (taskInput) {
+      taskInput.focus();
+      taskInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  } else if (e.key === 'e' || e.key === 'E') {
+    e.preventDefault();
+    toggleEditMode();
+  }
+});
 
 // Init
 fetchBotStatus();
