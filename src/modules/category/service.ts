@@ -67,6 +67,9 @@ export async function listCategories(): Promise<CategoryWithCount[]> {
 
 export async function addCategory(name: string): Promise<Category> {
   const cleanName = name.trim().toLowerCase();
+  if (!cleanName || cleanName === 'all') {
+    throw new Error("Invalid category name");
+  }
   const rows = await sql`
     INSERT INTO categories (name)
     VALUES (${cleanName})
@@ -78,21 +81,56 @@ export async function addCategory(name: string): Promise<Category> {
   return rows[0] as unknown as Category;
 }
 
-export async function updateCategory(id: number, newName: string): Promise<Category | null> {
+export async function updateCategory(idOrName: number | string, newName: string): Promise<Category | null> {
   const clean = newName.trim().toLowerCase();
-  if (!clean) return null;
+  if (!clean || clean === 'general' || clean === 'all') return null;
 
-  // Retrieve current category
-  const existing = await sql`SELECT name FROM categories WHERE id = ${id}`;
+  let existing;
+  let targetId: number;
+
+  if (typeof idOrName === 'number' || !isNaN(Number(idOrName))) {
+    targetId = Number(idOrName);
+    existing = await sql`SELECT id, name FROM categories WHERE id = ${targetId}`;
+  } else {
+    const cleanSearch = String(idOrName).trim().toLowerCase();
+    existing = await sql`SELECT id, name FROM categories WHERE LOWER(name) = ${cleanSearch}`;
+    if (existing.length > 0) {
+      targetId = existing[0].id;
+    } else {
+      return null;
+    }
+  }
+
   if (existing.length === 0 || existing[0].name === 'general') {
     return null; // not found or protected
   }
   const oldName = existing[0].name;
+  if (oldName === clean) {
+    return existing[0] as unknown as Category;
+  }
+
+  // Check if destination category already exists
+  const destExisting = await sql`SELECT id, name FROM categories WHERE LOWER(name) = ${clean}`;
+  if (destExisting.length > 0) {
+    const destCat = destExisting[0] as unknown as Category;
+    await sql`
+      UPDATE todo_items
+      SET category = ${clean}
+      WHERE LOWER(category) = LOWER(${oldName})
+    `;
+    await sql`
+      DELETE FROM categories
+      WHERE id = ${targetId} AND name != 'general'
+    `;
+    await redis.del(CATEGORY_CACHE_KEY);
+    await redis.del("todo:list");
+    return destCat;
+  }
 
   const rows = await sql`
     UPDATE categories
     SET name = ${clean}
-    WHERE id = ${id}
+    WHERE id = ${targetId}
     RETURNING id, name, created_at
   `;
   if (rows.length === 0) return null;

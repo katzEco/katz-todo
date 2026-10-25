@@ -11,17 +11,20 @@ let editingTaskId = null;
 
 function parseTitleAndCategory(rawInput, fallbackCategory = 'general') {
   const text = (rawInput || '').trim();
-  const bracketMatch = text.match(/^\[([a-zA-Z0-9_-]+)\]\s+(.+)$/);
+  const bracketMatch = text.match(/^\[([^\]]+)\]\s+(.+)$/s);
   if (bracketMatch) {
-    return { category: bracketMatch[1].toLowerCase(), title: bracketMatch[2].trim() };
+    const cat = bracketMatch[1].trim().toLowerCase();
+    return { category: cat === 'all' ? 'general' : cat, title: bracketMatch[2].trim() };
   }
-  const colonMatch = text.match(/^([a-zA-Z0-9_-]+):\s+(.+)$/);
+  const colonMatch = text.match(/^([^:\n]+):\s+(.+)$/s);
   if (colonMatch) {
-    return { category: colonMatch[1].toLowerCase(), title: colonMatch[2].trim() };
+    const cat = colonMatch[1].trim().toLowerCase();
+    return { category: cat === 'all' ? 'general' : cat, title: colonMatch[2].trim() };
   }
-  const flagMatch = text.match(/^(.+?)\s+(?:-c|--category)\s+([a-zA-Z0-9_-]+)$/);
+  const flagMatch = text.match(/^(.+?)\s+(?:-c|--category)\s+(.+)$/s);
   if (flagMatch) {
-    return { category: flagMatch[2].toLowerCase(), title: flagMatch[1].trim() };
+    const cat = flagMatch[2].trim().toLowerCase();
+    return { category: cat === 'all' ? 'general' : cat, title: flagMatch[1].trim() };
   }
   return { category: fallbackCategory, title: text };
 }

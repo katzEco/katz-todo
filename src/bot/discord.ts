@@ -15,6 +15,7 @@ import {
 import {
   listTodos,
   addTodo,
+  updateTodo,
   updateTodoStatus,
   deleteTodo,
   type TodoItem,
@@ -22,6 +23,7 @@ import {
 import {
   listCategories,
   addCategory,
+  updateCategory,
   deleteCategory,
 } from "../modules/category";
 import { isUserWhitelisted } from "../modules/whitelist";
@@ -31,6 +33,7 @@ const HELP_TEXT =
   "**Todo Commands:**\n" +
   "`!todo` (or `!todo list [category]`) - Show todos with interactive buttons (Public)\n" +
   "`!todo add [category] <title>` - Add todo (Whitelist required)\n" +
+  "`!todo move <id> <category>` - Move todo to category (Whitelist required)\n" +
   "`!todo done <id>` - Mark as completed (Whitelist required)\n" +
   "`!todo undone <id>` - Mark as incomplete (Whitelist required)\n" +
   "`!todo del <id>` - Delete a todo (Whitelist required)\n" +
@@ -38,6 +41,7 @@ const HELP_TEXT =
   "**Category Commands:**\n" +
   "`!todo category` (or `!todo category list`) - List categories (Public)\n" +
   "`!todo category add <name>` - Add new category (Whitelist required)\n" +
+  "`!todo category edit <name|id> <new_name>` - Rename category (Whitelist required)\n" +
   "`!todo category del <name|id>` - Delete a category (Whitelist required)\n\n" +
   "`!todo help` - Show this help message";
 
@@ -53,21 +57,33 @@ async function checkWhitelist(message: Message): Promise<boolean> {
   return true;
 }
 
-function parseTitleAndCategory(rawInput: string): { title: string; category: string } {
+function parseTitleAndCategory(rawInput: string, knownCategories: string[] = []): { title: string; category: string } {
   const text = rawInput.trim();
-  const bracketMatch = text.match(/^\[([a-zA-Z0-9_-]+)\]\s+(.+)$/);
+  const bracketMatch = text.match(/^\[([^\]]+)\]\s+(.+)$/s);
   if (bracketMatch) {
-    return { category: bracketMatch[1].toLowerCase(), title: bracketMatch[2].trim() };
+    const cat = bracketMatch[1].trim().toLowerCase();
+    return { category: cat === "all" ? "general" : cat, title: bracketMatch[2].trim() };
   }
-  const colonMatch = text.match(/^([a-zA-Z0-9_-]+):\s+(.+)$/);
+  const colonMatch = text.match(/^([^:\n]+):\s+(.+)$/s);
   if (colonMatch) {
-    return { category: colonMatch[1].toLowerCase(), title: colonMatch[2].trim() };
+    const cat = colonMatch[1].trim().toLowerCase();
+    return { category: cat === "all" ? "general" : cat, title: colonMatch[2].trim() };
   }
-  const flagMatch = text.match(/^(.+?)\s+(?:-c|--category)\s+([a-zA-Z0-9_-]+)$/);
+  const flagMatch = text.match(/^(.+?)\s+(?:-c|--category)\s+(.+)$/s);
   if (flagMatch) {
-    return { category: flagMatch[2].toLowerCase(), title: flagMatch[1].trim() };
+    const cat = flagMatch[2].trim().toLowerCase();
+    return { category: cat === "all" ? "general" : cat, title: flagMatch[1].trim() };
   }
-  return { category: 'general', title: text };
+  if (knownCategories.length > 0) {
+    const [first, ...rest] = text.split(/\s+/);
+    if (first && rest.length > 0) {
+      const lowerFirst = first.toLowerCase();
+      if (knownCategories.map((c) => c.toLowerCase()).includes(lowerFirst)) {
+        return { category: lowerFirst === "all" ? "general" : lowerFirst, title: rest.join(" ").trim() };
+      }
+    }
+  }
+  return { category: "general", title: text };
 }
 
 interface DiscordViewOptions {
@@ -196,6 +212,32 @@ async function handleList(message: Message, categoryFilter?: string) {
   }
 }
 
+// Protected: Move todo to category (Whitelist required)
+async function handleMove(message: Message, rawArgs: string) {
+  if (!(await checkWhitelist(message))) return;
+
+  const [idStr, ...catParts] = (rawArgs || "").trim().split(/\s+/);
+  const id = parseInt(idStr, 10);
+  const targetCat = catParts.join(" ").trim();
+
+  if (isNaN(id) || !targetCat) {
+    return await message.reply("Usage: `!todo move <id> <category>`\nExample: `!todo move 1 work`");
+  }
+
+  try {
+    const cleanCat = targetCat.replace(/^\[|\]$/g, "").trim().toLowerCase();
+    const item = await updateTodo(id, { category: cleanCat });
+    if (!item) {
+      return await message.reply(`Todo #${id} not found.`);
+    }
+
+    return await message.reply(`Moved todo **#${item.id}** to **[${item.category}]** 🏷️`);
+  } catch (err: any) {
+    console.error("Discord move error:", err);
+    return await message.reply(`Error moving todo: ${err.message}`);
+  }
+}
+
 // Protected: Add todo (Whitelist required)
 async function handleAdd(message: Message, rawText: string) {
   if (!(await checkWhitelist(message))) return;
@@ -219,7 +261,9 @@ async function handleAdd(message: Message, rawText: string) {
   }
 
   try {
-    const { title, category } = parseTitleAndCategory(rawText);
+    const cats = await listCategories();
+    const knownCats = cats.map((c) => c.name);
+    const { title, category } = parseTitleAndCategory(rawText, knownCats);
     const item = await addTodo(title, category);
     const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
@@ -350,6 +394,25 @@ async function handleCategoryCommand(message: Message, rawArgs: string) {
     }
   }
 
+  // Protected: Edit / Rename category
+  if (subCmd === "edit" || subCmd === "rename" || subCmd === "update") {
+    if (!(await checkWhitelist(message))) return;
+    const [target, ...newNameParts] = val.split(/\s+/);
+    const newName = newNameParts.join(" ").trim();
+    if (!target || !newName) {
+      return await message.reply("Usage: `!todo category edit <name|id> <new_name>`");
+    }
+    try {
+      const updated = await updateCategory(target, newName);
+      if (!updated) {
+        return await message.reply(`Cannot edit category "${target}" (not found or protected "general").`);
+      }
+      return await message.reply(`Renamed category to **#${updated.id}** [${updated.name}] ✏️`);
+    } catch (err: any) {
+      return await message.reply(`Error editing category: ${err.message}`);
+    }
+  }
+
   // Protected: Delete category
   if (subCmd === "del" || subCmd === "delete" || subCmd === "rm") {
     if (!(await checkWhitelist(message))) return;
@@ -368,7 +431,7 @@ async function handleCategoryCommand(message: Message, rawArgs: string) {
   }
 
   return await message.reply(
-    `Unknown category action: "${subCmd}".\nUsage:\n\`!todo category\` (or list)\n\`!todo category add <name>\`\n\`!todo category del <name|id>\``
+    `Unknown category action: "${subCmd}".\nUsage:\n\`!todo category\` (or list)\n\`!todo category add <name>\`\n\`!todo category edit <name|id> <new_name>\`\n\`!todo category del <name|id>\``
   );
 }
 
@@ -420,7 +483,21 @@ export function createDiscordBot(token: string) {
           const statusText = `\n\n🆔 **Your Discord User ID:** \`${message.author.id}\` (${isSenderWhitelisted ? "✅ Whitelisted" : "❌ Not Whitelisted"})`;
           await message.reply(HELP_TEXT + statusText); // Public
         } else if (sub === "category" || sub === "cat") {
-          await handleCategoryCommand(message, subArgText);
+          const [firstArg] = subArgText.split(/\s+/);
+          if (firstArg && !isNaN(Number(firstArg))) {
+            await handleMove(message, subArgText);
+          } else {
+            await handleCategoryCommand(message, subArgText);
+          }
+        } else if (sub === "move" || sub === "mov" || sub === "setcat") {
+          await handleMove(message, subArgText); // Protected
+        } else if (sub === "edit") {
+          const [idStr] = subArgText.split(/\s+/);
+          if (idStr && !isNaN(Number(idStr))) {
+            await handleMove(message, subArgText);
+          } else {
+            await handleCategoryCommand(message, `edit ${subArgText}`);
+          }
         } else if (sub === "add") {
           await handleAdd(message, subArgText); // Protected
         } else if (sub === "done") {
@@ -435,7 +512,14 @@ export function createDiscordBot(token: string) {
           await message.reply(`Unknown subcommand: "${args[0]}".\n\n${HELP_TEXT}`);
         }
       } else if (command === "category" || command === "cat") {
-        await handleCategoryCommand(message, argText);
+        const [firstArg] = argText.split(/\s+/);
+        if (firstArg && !isNaN(Number(firstArg))) {
+          await handleMove(message, argText);
+        } else {
+          await handleCategoryCommand(message, argText);
+        }
+      } else if (command === "move" || command === "mov" || command === "setcat") {
+        await handleMove(message, argText); // Protected
       } else if (command === "list") {
         await handleList(message, argText || undefined); // Public
       } else if (command === "add") {

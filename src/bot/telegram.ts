@@ -11,6 +11,7 @@ import {
 import {
   listCategories,
   addCategory,
+  updateCategory,
   deleteCategory,
   type CategoryWithCount,
 } from "../modules/category";
@@ -21,6 +22,7 @@ const HELP_TEXT =
   "*Todo Commands:*\n" +
   "/todo (or /todo list [category]) - List todos with interactive buttons (Public)\n" +
   "/todo add [category] <title> - Add todo (Whitelist required)\n" +
+  "/todo move <id> <category> - Move todo to category (Whitelist required)\n" +
   "/todo done <id> - Mark as completed (Whitelist required)\n" +
   "/todo undone <id> - Mark as incomplete (Whitelist required)\n" +
   "/todo del <id> - Delete a todo (Whitelist required)\n" +
@@ -29,8 +31,13 @@ const HELP_TEXT =
   "*Category Commands:*\n" +
   "/todo category (or list) - List categories (Public)\n" +
   "/todo category add <name> - Add category (Whitelist required)\n" +
+  "/todo category edit <name|id> <new_name> - Rename category (Whitelist required)\n" +
   "/todo category del <name|id> - Delete category (Whitelist required)\n\n" +
   "/todo help - Show this help message";
+
+function escapeMarkdown(text: string): string {
+  return (text || "").replace(/([*_`\[\]])/g, "\\$1");
+}
 
 export function getPersistentKeyboard(): Keyboard {
   return new Keyboard()
@@ -75,19 +82,31 @@ async function checkWhitelist(ctx: Context, isCallback = false): Promise<boolean
   return true;
 }
 
-function parseTitleAndCategory(rawInput: string): { title: string; category: string } {
+function parseTitleAndCategory(rawInput: string, knownCategories: string[] = []): { title: string; category: string } {
   const text = rawInput.trim();
-  const bracketMatch = text.match(/^\[([a-zA-Z0-9_-]+)\]\s+(.+)$/);
+  const bracketMatch = text.match(/^\[([^\]]+)\]\s+(.+)$/s);
   if (bracketMatch) {
-    return { category: bracketMatch[1].toLowerCase(), title: bracketMatch[2].trim() };
+    const cat = bracketMatch[1].trim().toLowerCase();
+    return { category: cat === "all" ? "general" : cat, title: bracketMatch[2].trim() };
   }
-  const colonMatch = text.match(/^([a-zA-Z0-9_-]+):\s+(.+)$/);
+  const colonMatch = text.match(/^([^:\n]+):\s+(.+)$/s);
   if (colonMatch) {
-    return { category: colonMatch[1].toLowerCase(), title: colonMatch[2].trim() };
+    const cat = colonMatch[1].trim().toLowerCase();
+    return { category: cat === "all" ? "general" : cat, title: colonMatch[2].trim() };
   }
-  const flagMatch = text.match(/^(.+?)\s+(?:-c|--category)\s+([a-zA-Z0-9_-]+)$/);
+  const flagMatch = text.match(/^(.+?)\s+(?:-c|--category)\s+(.+)$/s);
   if (flagMatch) {
-    return { category: flagMatch[2].toLowerCase(), title: flagMatch[1].trim() };
+    const cat = flagMatch[2].trim().toLowerCase();
+    return { category: cat === "all" ? "general" : cat, title: flagMatch[1].trim() };
+  }
+  if (knownCategories.length > 0) {
+    const [first, ...rest] = text.split(/\s+/);
+    if (first && rest.length > 0) {
+      const lowerFirst = first.toLowerCase();
+      if (knownCategories.map((c) => c.toLowerCase()).includes(lowerFirst)) {
+        return { category: lowerFirst === "all" ? "general" : lowerFirst, title: rest.join(" ").trim() };
+      }
+    }
   }
   return { category: "general", title: text };
 }
@@ -108,21 +127,23 @@ function buildTodoKeyboard(
   const category = (options.category || "all").toLowerCase();
   const pageSize = 5;
 
-  const total = allItems.length;
-  const pendingCount = allItems.filter((t) => !t.completed).length;
-  const completedCount = total - pendingCount;
-
-  let filtered = allItems;
+  let catItems = allItems;
   if (category !== "all") {
-    filtered = filtered.filter(
+    catItems = catItems.filter(
       (t) => (t.category || "general").toLowerCase() === category
     );
   }
+
+  let filtered = catItems;
   if (status === "pending") {
     filtered = filtered.filter((t) => !t.completed);
   } else if (status === "completed") {
     filtered = filtered.filter((t) => t.completed);
   }
+
+  const total = catItems.length;
+  const pendingCount = catItems.filter((t) => !t.completed).length;
+  const completedCount = total - pendingCount;
 
   const totalPages = Math.max(Math.ceil(filtered.length / pageSize), 1);
   const safePage = Math.min(Math.max(page, 0), totalPages - 1);
@@ -132,7 +153,13 @@ function buildTodoKeyboard(
 
   // Row 0: Category filter chips
   kb.text(`${category === "all" ? "🏷️ All" : "All"}`, `v:p:0:s:${status}:c:all`);
-  const topCats = categories.slice(0, 3);
+  const topCats: CategoryWithCount[] = [];
+  const activeCatObj = categories.find((c) => c.name.toLowerCase() === category);
+  if (activeCatObj && !categories.slice(0, 3).some((c) => c.id === activeCatObj.id)) {
+    topCats.push(...categories.slice(0, 2), activeCatObj);
+  } else {
+    topCats.push(...categories.slice(0, 3));
+  }
   for (const c of topCats) {
     const isSelected = category === c.name.toLowerCase();
     kb.text(`${isSelected ? "● " : ""}${c.name}`, `v:p:0:s:${status}:c:${c.name}`);
@@ -198,7 +225,7 @@ function buildTodoKeyboard(
     const catLabel = category !== "all" ? ` [${category.toUpperCase()}]` : "";
     const statusLabel = status !== "all" ? ` (${status.toUpperCase()})` : "";
     const lines = pageItems.map(
-      (t) => `${t.completed ? "✅" : "⬜"} *#${t.id}* [${t.category}] ${t.title}`
+      (t) => `${t.completed ? "✅" : "⬜"} *#${t.id}* \`[${t.category || "general"}]\` ${escapeMarkdown(t.title)}`
     );
     text = `📋 *Todos${catLabel}${statusLabel}* (Page ${safePage + 1}/${totalPages}):\n\n${lines.join(
       "\n"
@@ -250,7 +277,7 @@ async function renderTaskDetails(
   const createdStr = new Date(task.created_at).toLocaleString();
   const text =
     `📋 *Task #${task.id} Details*\n\n` +
-    `• *Title:* ${task.title}\n` +
+    `• *Title:* ${escapeMarkdown(task.title)}\n` +
     `• *Category:* \`[${task.category}]\`\n` +
     `• *Status:* ${task.completed ? "✅ Completed" : "⏳ Pending"}\n` +
     `• *Created:* ${createdStr}`;
@@ -295,7 +322,7 @@ async function renderMoveCategoryMenu(
     const isCurrent = task.category.toLowerCase() === c.name.toLowerCase();
     kb.text(
       `${isCurrent ? "● " : ""}${c.name}`,
-      `setc:${id}:${c.name}:p:${page}:s:${status}:c:${category}`
+      `setc:${id}:${c.id}:p:${page}:s:${status}:c:${category}`
     );
     if (i % 2 === 1) kb.row();
   }
@@ -305,7 +332,7 @@ async function renderMoveCategoryMenu(
 
   const text =
     `🏷️ *Move Task #${task.id}*\n\n` +
-    `Title: "${task.title}"\n` +
+    `Title: "${escapeMarkdown(task.title)}"\n` +
     `Current: \`[${task.category}]\`\n\n` +
     `_Tap a category below to reassign:_`;
 
@@ -378,7 +405,7 @@ async function handleCategoryInteractive(ctx: Context, isCallback = false) {
       .row()
       .text("🔄 Refresh", "cats");
 
-    const lines = cats.map((c) => `• *${c.name}* — ${c.todo_count} tasks`);
+    const lines = cats.map((c) => `• \`${c.name}\` — ${c.todo_count} tasks`);
     const text = `📁 *Categories Explorer*\n_Tap any category to filter tasks:_\n\n${lines.join(
       "\n"
     )}`;
@@ -443,6 +470,43 @@ async function handlePromptAddCategory(ctx: Context) {
   );
 }
 
+// Protected: Move todo to a category (Whitelist required)
+async function handleMove(ctx: Context, rawArgs: string) {
+  if (!(await checkWhitelist(ctx))) return;
+
+  const [idStr, ...catParts] = (rawArgs || "").trim().split(/\s+/);
+  const id = parseInt(idStr, 10);
+  const targetCat = catParts.join(" ").trim();
+
+  if (isNaN(id) || !targetCat) {
+    return await ctx.reply("Usage: `/todo move <id> <category>`\nExample: `/todo move 1 work`", {
+      parse_mode: "Markdown",
+    });
+  }
+
+  try {
+    const cleanCat = targetCat.replace(/^\[|\]$/g, "").trim().toLowerCase();
+    const item = await updateTodo(id, { category: cleanCat });
+    if (!item) {
+      return await ctx.reply(`Todo #${id} not found.`);
+    }
+
+    const kb = new InlineKeyboard()
+      .text(`📂 View [${item.category}]`, `v:p:0:s:all:c:${item.category}`)
+      .text(`⚙️ Manage #${item.id}`, `det:${item.id}:p:0:s:all:c:all`)
+      .row()
+      .text("📋 All Tasks", "v:p:0:s:all:c:all");
+
+    return await ctx.reply(`Moved todo #${item.id} to *[${item.category}]* 🏷️`, {
+      parse_mode: "Markdown",
+      reply_markup: kb,
+    });
+  } catch (err: any) {
+    console.error("Telegram move error:", err);
+    return await ctx.reply(`Error moving todo: ${err.message}`);
+  }
+}
+
 // Protected: Add todo (Whitelist required)
 async function handleAdd(ctx: Context, rawText: string) {
   if (!(await checkWhitelist(ctx))) return;
@@ -451,7 +515,9 @@ async function handleAdd(ctx: Context, rawText: string) {
     return await handlePromptAdd(ctx);
   }
   try {
-    const { title, category } = parseTitleAndCategory(rawText);
+    const cats = await listCategories();
+    const knownCats = cats.map((c) => c.name);
+    const { title, category } = parseTitleAndCategory(rawText, knownCats);
     const item = await addTodo(title, category);
     const kb = new InlineKeyboard()
       .text(`✅ Done #${item.id}`, `done:${item.id}`)
@@ -589,6 +655,11 @@ async function handleCategoryCommand(ctx: Context, rawArgs: string) {
   const subCmd = sub ? sub.toLowerCase() : "";
   const val = rest.join(" ").trim();
 
+  // If first argument is numeric, user might be running /todo cat <id> <category>
+  if (subCmd && !isNaN(Number(subCmd))) {
+    return await handleMove(ctx, rawArgs);
+  }
+
   // Public: List categories
   if (!subCmd || subCmd === "list" || subCmd === "ls") {
     return await handleCategoryInteractive(ctx);
@@ -614,6 +685,34 @@ async function handleCategoryCommand(ctx: Context, rawArgs: string) {
     }
   }
 
+  // Protected: Edit / Rename category
+  if (subCmd === "edit" || subCmd === "rename" || subCmd === "update") {
+    if (!(await checkWhitelist(ctx))) return;
+    const [target, ...newNameParts] = val.split(/\s+/);
+    const newName = newNameParts.join(" ").trim();
+    if (!target || !newName) {
+      return await ctx.reply(
+        "Usage: `/todo category edit <name|id> <new_name>`\nExample: `/todo category edit work projects`",
+        { parse_mode: "Markdown" }
+      );
+    }
+    try {
+      const updated = await updateCategory(target, newName);
+      if (!updated) {
+        return await ctx.reply(`Cannot edit category "${target}" (not found or protected "general").`);
+      }
+      const kb = new InlineKeyboard()
+        .text(`📂 View [${updated.name}]`, `v:p:0:s:all:c:${updated.name}`)
+        .text("📁 All Categories", "cats");
+      return await ctx.reply(`Renamed category to *#${updated.id}* [${updated.name}] ✏️`, {
+        parse_mode: "Markdown",
+        reply_markup: kb,
+      });
+    } catch (err: any) {
+      return await ctx.reply(`Error editing category: ${err.message}`);
+    }
+  }
+
   // Protected: Delete category
   if (subCmd === "del" || subCmd === "delete" || subCmd === "rm") {
     if (!(await checkWhitelist(ctx))) return;
@@ -632,7 +731,7 @@ async function handleCategoryCommand(ctx: Context, rawArgs: string) {
   }
 
   return await ctx.reply(
-    `Unknown category action: "${subCmd}".\nUsage:\n/todo category (or list)\n/todo category add <name>\n/todo category del <name|id>`,
+    `Unknown category action: "${subCmd}".\nUsage:\n/todo category (or list)\n/todo category add <name>\n/todo category edit <name|id> <new_name>\n/todo category del <name|id>`,
     { parse_mode: "Markdown" }
   );
 }
@@ -695,7 +794,12 @@ export function createTelegramBot(token: string) {
 
   // Category command
   bot.command(["category", "cat"], async (ctx) => {
-    await handleCategoryCommand(ctx, ctx.match || "");
+    const match = (ctx.match || "").trim();
+    const [firstArg] = match.split(/\s+/);
+    if (firstArg && !isNaN(Number(firstArg))) {
+      return await handleMove(ctx, match);
+    }
+    await handleCategoryCommand(ctx, match);
   });
 
   // Task & Todo command
@@ -716,7 +820,19 @@ export function createTelegramBot(token: string) {
     } else if (sub === "stats" || sub === "analytics") {
       return await handleStats(ctx);
     } else if (sub === "category" || sub === "cat") {
+      const [firstArg] = restText.split(/\s+/);
+      if (firstArg && !isNaN(Number(firstArg))) {
+        return await handleMove(ctx, restText);
+      }
       return await handleCategoryCommand(ctx, restText);
+    } else if (sub === "move" || sub === "mov" || sub === "setcat") {
+      return await handleMove(ctx, restText); // Protected
+    } else if (sub === "edit") {
+      const [idStr] = restText.split(/\s+/);
+      if (idStr && !isNaN(Number(idStr))) {
+        return await handleMove(ctx, restText);
+      }
+      return await handleCategoryCommand(ctx, `edit ${restText}`);
     } else if (sub === "add") {
       return await handleAdd(ctx, restText); // Protected
     } else if (sub === "done") {
@@ -745,7 +861,7 @@ export function createTelegramBot(token: string) {
 
     // View navigation: v:p:<page>:s:<status>:c:<category>
     if (data.startsWith("v:")) {
-      const match = data.match(/^v:p:(\d+):s:(all|pending|completed):c:([a-zA-Z0-9_-]+)$/);
+      const match = data.match(/^v:p:(\d+):s:(all|pending|completed):c:(.+)$/);
       if (match) {
         const page = parseInt(match[1], 10);
         const status = match[2] as "all" | "pending" | "completed";
@@ -758,7 +874,7 @@ export function createTelegramBot(token: string) {
     // Toggle done/undone: toggle:<id>:p:<page>:s:<status>:c:<category>
     if (data.startsWith("toggle:")) {
       if (!(await checkWhitelist(ctx, true))) return;
-      const match = data.match(/^toggle:(\d+):p:(\d+):s:(all|pending|completed):c:([a-zA-Z0-9_-]+)$/);
+      const match = data.match(/^toggle:(\d+):p:(\d+):s:(all|pending|completed):c:(.+)$/);
       if (match) {
         const id = parseInt(match[1], 10);
         const page = parseInt(match[2], 10);
@@ -778,7 +894,7 @@ export function createTelegramBot(token: string) {
 
     // Task details card: det:<id>:p:<page>:s:<status>:c:<category>
     if (data.startsWith("det:")) {
-      const match = data.match(/^det:(\d+):p:(\d+):s:(all|pending|completed):c:([a-zA-Z0-9_-]+)$/);
+      const match = data.match(/^det:(\d+):p:(\d+):s:(all|pending|completed):c:(.+)$/);
       if (match) {
         const id = parseInt(match[1], 10);
         const page = parseInt(match[2], 10);
@@ -792,7 +908,7 @@ export function createTelegramBot(token: string) {
     // Move task category selector: mov:<id>:p:<page>:s:<status>:c:<category>
     if (data.startsWith("mov:")) {
       if (!(await checkWhitelist(ctx, true))) return;
-      const match = data.match(/^mov:(\d+):p:(\d+):s:(all|pending|completed):c:([a-zA-Z0-9_-]+)$/);
+      const match = data.match(/^mov:(\d+):p:(\d+):s:(all|pending|completed):c:(.+)$/);
       if (match) {
         const id = parseInt(match[1], 10);
         const page = parseInt(match[2], 10);
@@ -803,19 +919,26 @@ export function createTelegramBot(token: string) {
       }
     }
 
-    // Reassign task category: setc:<id>:<newCat>:p:<page>:s:<status>:c:<category>
+    // Reassign task category: setc:<id>:<catIdOrName>:p:<page>:s:<status>:c:<category>
     if (data.startsWith("setc:")) {
       if (!(await checkWhitelist(ctx, true))) return;
-      const match = data.match(/^setc:(\d+):([a-zA-Z0-9_-]+):p:(\d+):s:(all|pending|completed):c:([a-zA-Z0-9_-]+)$/);
+      const match = data.match(/^setc:(\d+):([^:]+):p:(\d+):s:(all|pending|completed):c:(.+)$/);
       if (match) {
         const id = parseInt(match[1], 10);
-        const newCat = match[2];
+        const catTarget = match[2];
         const page = parseInt(match[3], 10);
         const status = match[4] as "all" | "pending" | "completed";
         const category = match[5];
 
-        await updateTodo(id, { category: newCat });
-        await ctx.answerCallbackQuery({ text: `Moved #${id} to [${newCat}] 🏷️` });
+        const cats = await listCategories();
+        let newCatName = catTarget;
+        if (!isNaN(Number(catTarget))) {
+          const foundCat = cats.find((c) => c.id === parseInt(catTarget, 10));
+          if (foundCat) newCatName = foundCat.name;
+        }
+
+        await updateTodo(id, { category: newCatName });
+        await ctx.answerCallbackQuery({ text: `Moved #${id} to [${newCatName}] 🏷️` });
         return await renderTaskDetails(ctx, id, page, status, category);
       }
     }
@@ -823,7 +946,7 @@ export function createTelegramBot(token: string) {
     // Delete task: del:<id>:p:<page>:s:<status>:c:<category> or simple del:<id>
     if (data.startsWith("del:")) {
       if (!(await checkWhitelist(ctx, true))) return;
-      const match = data.match(/^del:(\d+)(?::p:(\d+):s:(all|pending|completed):c:([a-zA-Z0-9_-]+))?$/);
+      const match = data.match(/^del:(\d+)(?::p:(\d+):s:(all|pending|completed):c:(.+))?$/);
       if (match) {
         const id = parseInt(match[1], 10);
         const page = match[2] ? parseInt(match[2], 10) : 0;
@@ -958,10 +1081,13 @@ export function createTelegramBot(token: string) {
         reply.text.includes("Category ["))
     ) {
       if (!(await checkWhitelist(ctx))) return;
-      const match = reply.text.match(/\[([a-zA-Z0-9_-]+)\]/);
+      const match = reply.text.match(/\[([^\]]+)\]/);
       const defaultCat = match ? match[1].toLowerCase() : "general";
-      const { title, category } = parseTitleAndCategory(ctx.message.text);
-      const item = await addTodo(title, category === "general" ? defaultCat : category);
+      const cats = await listCategories();
+      const knownCats = cats.map((c) => c.name);
+      const { title, category } = parseTitleAndCategory(ctx.message.text, knownCats);
+      const finalCat = category === "general" ? defaultCat : category;
+      const item = await addTodo(title, finalCat);
       const kb = new InlineKeyboard()
         .text(`✅ Done #${item.id}`, `done:${item.id}`)
         .text(`⚙️ Manage`, `det:${item.id}:p:0:s:all:c:all`)
@@ -983,6 +1109,7 @@ export function createTelegramBot(token: string) {
   bot.command("undone", (ctx) => handleUndone(ctx, (ctx.match || "").trim())); // Protected
   bot.command(["del", "delete"], (ctx) => handleDelete(ctx, (ctx.match || "").trim())); // Protected
   bot.command(["clear", "clearchat", "purge"], (ctx) => handleClear(ctx, ctx.match?.trim())); // Protected
+  bot.command(["move", "mov", "setcat"], (ctx) => handleMove(ctx, (ctx.match || "").trim())); // Protected
 
   return bot;
 }

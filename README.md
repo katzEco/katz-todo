@@ -417,11 +417,13 @@ Both Telegram (`/todo ...`, `/task ...`) and Discord (`!todo ...`, `!task ...`) 
 | `!todo stats` | `/todo stats`, `/stats` | None | **Public** | Visual analytics dashboard with progress bar & category counts |
 | `!todo category` or `!todo category list` | `/todo category` or `/todo category list` | None | **Public** | List all categories with task counts |
 | `!todo add` | `/todo add` | `[category] <title>` | **Whitelist** | Create a new todo item with optional category |
+| `!todo move` | `/todo move`, `/move` | `<id> <category>` | **Whitelist** | Move a todo item to another category |
 | `!todo done` | `/todo done` | `<id>` | **Whitelist** | Mark a todo item as completed |
 | `!todo undone` | `/todo undone` | `<id>` | **Whitelist** | Mark a todo item as incomplete |
 | `!todo del` | `/todo del` | `<id>` | **Whitelist** | Delete a todo item by ID |
 | `!todo clear` | `/todo clear`, `/clear` | `[count]` | **Whitelist** | Clear recent chat messages (1-100) |
 | `!todo category add` | `/todo category add` | `<name>` | **Whitelist** | Create a new category |
+| `!todo category edit` | `/todo category edit` | `<name\|id> <new_name>` | **Whitelist** | Rename an existing category |
 | `!todo category del` | `/todo category del` | `<name\|id>` | **Whitelist** | Delete a category |
 
 > [!NOTE]

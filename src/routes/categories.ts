@@ -27,15 +27,15 @@ categoryRoutes.post('/', async (c) => {
 
 // PATCH /categories/:id - Update category name
 categoryRoutes.patch('/:id', async (c) => {
-  const id = parseInt(c.req.param('id'), 10);
-  if (isNaN(id)) {
-    return c.json({ error: "invalid id" }, 400);
+  const idOrName = c.req.param('id');
+  if (!idOrName) {
+    return c.json({ error: "id or name is required" }, 400);
   }
   const body = await c.req.json<{ name: string }>().catch(() => ({ name: '' }));
   if (!body.name?.trim()) {
     return c.json({ error: "name is required" }, 400);
   }
-  const updated = await updateCategory(id, body.name.trim());
+  const updated = await updateCategory(idOrName, body.name.trim());
   if (!updated) {
     return c.json({ error: "category not found or protected ('general')" }, 404);
   }

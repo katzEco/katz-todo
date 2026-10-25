@@ -51,16 +51,17 @@ export async function listTodos(categoryFilter?: string): Promise<TodoItem[]> {
     await redis.expire(CACHE_KEY, CACHE_TTL);
   }
 
-  if (categoryFilter) {
+  if (categoryFilter && categoryFilter.trim().toLowerCase() !== "all") {
     const filter = categoryFilter.trim().toLowerCase();
-    return items.filter((t) => t.category.toLowerCase() === filter);
+    return items.filter((t) => (t.category || "general").toLowerCase() === filter);
   }
 
   return items;
 }
 
 export async function addTodo(title: string, category: string = 'general'): Promise<TodoItem> {
-  const cleanCat = (category || 'general').trim().toLowerCase();
+  const rawCat = (category || 'general').trim().toLowerCase();
+  const cleanCat = (!rawCat || rawCat === 'all') ? 'general' : rawCat;
 
   // Ensure category exists in categories table
   await sql`
@@ -87,7 +88,8 @@ export async function updateTodo(id: number, updates: UpdateTodoDto): Promise<To
     fields.push(sql`completed = ${updates.completed}`);
   }
   if (updates.category) {
-    const cleanCat = updates.category.trim().toLowerCase();
+    const rawCat = updates.category.trim().toLowerCase();
+    const cleanCat = (!rawCat || rawCat === 'all') ? 'general' : rawCat;
     await sql`
       INSERT INTO categories (name)
       VALUES (${cleanCat})
@@ -143,7 +145,7 @@ export async function getTodoStats(): Promise<TodoStats> {
 
   const categoryCounts: Record<string, number> = {};
   for (const item of items) {
-    const cat = item.category || 'general';
+    const cat = (item.category || 'general').toLowerCase();
     categoryCounts[cat] = (categoryCounts[cat] || 0) + 1;
   }
 
